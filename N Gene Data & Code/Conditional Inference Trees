@@ -1,0 +1,10 @@
+cdf <- read.table("Tillage-QPCR-Full-CtreeInput.txt", header = TRUE, as.is = T)
+nirS <- cdf$Nir.Nos
+cdf$Crop <- as.factor(cdf$Crop)
+cdf$Tillage <- as.factor(cdf$Tillage)
+cdf$Type <- as.factor(cdf$Type)
+
+form1 <- nirS.g ~ Precip1 + Precip2 + Precip3 + Daylight + Air.Temp + GDD + S.GDD + C.GDD + Crop + Type + Tillage + Moisture
+
+ct <- ctree (form1, cdf, control = ctree_control(mincriterion = 0.90, nresample =999))
+plot(ct)

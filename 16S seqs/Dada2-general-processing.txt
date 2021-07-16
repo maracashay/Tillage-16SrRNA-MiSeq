@@ -1,0 +1,121 @@
+#### 1. set working directory ####
+setwd("~/Box/Tillage 16S Sequences")
+path<- setwd("~/Box/Tillage 16S Sequences")
+
+list.files(path)
+
+
+#### 2. Sort the forward and reverse reads #####
+# Forward and reverse fastq filenames have format: SAMPLENAME_R1_001.fastq and SAMPLENAME_R2_001.fastq
+fnFs <- sort(list.files(path, pattern="_R1_001.fastq.gz", full.names = TRUE))
+fnRs <- sort(list.files(path, pattern="_R2_001.fastq.gz", full.names = TRUE))
+
+sample.names <- sapply(strsplit(basename(fnFs), "_"), `[`, 1)
+sample.names
+
+#### 3. Examine the quality profiles ####
+
+## forward reads ##
+
+plotQualityProfile(fnFs[1:2])
+
+## reverse reads ##
+
+plotQualityProfile(fnRs[1:2])
+
+#### 4. Assign Filtering samples ####
+# Assign the filenames for the filtered fastq.gz files
+
+# Place filtered files in filtered/ subdirectory
+filt_path <- file.path(path, "filtered") #you should see this in your global environment
+filtFs <- file.path(filt_path, paste0(sample.names, "_F_filt.fastq.gz"))
+filtRs <- file.path(filt_path, paste0(sample.names, "_R_filt.fastq.gz"))
+
+
+out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(230,200), trimLeft = c(20,20),
+                     maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
+                     compress=TRUE, multithread=TRUE) 
+
+
+#### 5. Train Dada2 to assess errors ####
+
+errF <- learnErrors(filtFs, multithread=TRUE)
+
+errR <- learnErrors(filtRs, multithread=TRUE)
+
+plotErrors(errF, nominalQ=TRUE)
+
+
+#### 6. Dereplicate the filtered fastq files ####
+derepFs <- derepFastq(filtFs, verbose=TRUE)
+derepRs <- derepFastq(filtRs, verbose=TRUE)
+
+# Name the derep-class objects by the sample names
+names(derepFs) <- sample.names
+names(derepRs) <- sample.names
+
+
+#### 7. Infer the sequence variants in each sample #####
+
+dadaFs <- dada(derepFs, err=errF, multithread=TRUE)
+dadaRs <- dada(derepRs, err=errR, multithread=TRUE)
+
+
+#### 8.  Merge the denoised forward and reverse reads: ####
+
+mergers <- mergePairs(dadaFs, derepFs, dadaRs, derepRs, verbose=TRUE)
+
+
+seqtab <- makeSequenceTable(mergers)
+
+dim(seqtab)
+
+
+table(nchar(getSequences(seqtab)))
+
+
+seqtab2 <- seqtab[,nchar(colnames(seqtab)) %in% seq(250,254)] #this removes sequences shorter than 250 or longer than 256
+
+
+#### 9.  Remove chimeric sequences ####
+
+seqtab.nochim <- removeBimeraDenovo(seqtab2, method="consensus", multithread=TRUE, verbose=TRUE)
+
+
+sum(seqtab.nochim)/sum(seqtab)
+
+
+#### 10. Combine sequence reductions by sample from each step #####
+getN <- function(x) sum(getUniques(x))
+
+track <- cbind(out, sapply(dadaFs, getN), sapply(mergers, getN), rowSums(seqtab), rowSums(seqtab.nochim))
+
+colnames(track) <- c("input", "filtered", "denoised", "merged", "tabled", "nonchim")
+rownames(track) <- sample.names
+head(track)
+
+
+#### 11. Assign taxonomy ####
+taxa <- assignTaxonomy(seqtab.nochim, "~/Downloads/silva_nr99_v138_train_set.fa", multithread=TRUE)
+taxa.spp <- addSpecies(taxa, "~/Downloads/silva_species_assignment_v138.fa")
+
+#### 12. Make Phyloseq Object ####
+meta <- read.table("16S-Tillage-Data.txt", row.names = 1, header = TRUE)
+asv.table<-t(otu_table(seqtab.nochim, taxa_are_rows=FALSE))
+ps <- phyloseq(t(asv.table), tax_table(taxa.spp), sample_data(meta))
+
+#### 13. Relabel Taxa to be 'ASV1', 'ASV2', etc. rather than the actual nucleotide sequence ####
+ps.1 <- ps
+
+dna <- Biostrings::DNAStringSet(taxa_names(ps.1))
+names(dna) <- taxa_names(ps.1)
+ps.1 <- merge_phyloseq(ps.1, dna)
+taxa_names(ps.1) <- paste0("ASV", seq(ntaxa(ps.1)))
+
+#### 14. Filter out Mitochondria and keep Bacteria/Archaea ####
+ps.2 = subset_taxa(ps.1, Kingdom == "Bacteria" | Kingdom == "Archaea")
+ps.3 <- subset_taxa(ps.2, Family != "Mitochondria")
+
+# calculate relative abundances 
+ps.rel <- transform_sample_counts(ps.3, function(x) x/sum(x))
+

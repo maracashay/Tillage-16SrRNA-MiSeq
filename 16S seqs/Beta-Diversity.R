@@ -1,3 +1,9 @@
+library(compositions)
+library(microbiome)
+library(vegan)
+library(phyloseq)
+library(RVAideMemoire)
+
 pruned.otu <- data.frame(ps.4@otu_table)
 map.pruned <- data.frame(ps.4@sam_data)
 # transform via center-log ratio

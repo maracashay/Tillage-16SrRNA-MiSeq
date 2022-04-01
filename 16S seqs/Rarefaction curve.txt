@@ -1,0 +1,11 @@
+library(vegan)
+otu.table <- data.frame(ps.4@otu_table)
+
+S <- specnumber(otu.table) # observed number of species
+(raremax <- min(rowSums(otu.table)))
+Srare <- rarefy(otu.table, raremax)
+plot(S, Srare, xlab = "Observed No. of Species", ylab = "Rarefied No. of Species")
+
+pdf("Rarefaction-Curve-Tillage-16S.pdf")
+rarecurve(otu.table, step = 50, sample = raremax, col = "blue", cex = 0.6, label = TRUE)
+dev.off()
